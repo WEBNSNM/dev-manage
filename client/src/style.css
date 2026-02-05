@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/* --- 👇 追加以下代码 --- */
+
+/* 1. 强制浏览器识别为暗黑模式 (有助于部分原生控件变黑) */
+:root {
+  color-scheme: dark;
+}
+
+/* 2. 自定义全局滚动条 (Chrome/Edge/Safari) */
+::-webkit-scrollbar {
+  width: 10px;  /* 纵向滚动条宽度 */
+  height: 10px; /* 横向滚动条高度 */
+}
+
+/* 滚动条轨道 (背景) - 设为透明或和背景一致 */
+::-webkit-scrollbar-track {
+  background: #0f172a; /* 对应 Tailwind bg-slate-900 */
+}
+
+/* 滚动条滑块 (滑块本身) */
+::-webkit-scrollbar-thumb {
+  background: #334155; /* 对应 Tailwind bg-slate-700 */
+  border-radius: 5px;
+  border: 2px solid #0f172a; /* 制造一点间隙感 */
+}
+
+/* 鼠标悬停在滑块上 */
+::-webkit-scrollbar-thumb:hover {
+  background: #475569; /* 对应 Tailwind bg-slate-600 */
+}
+
+/* 3. 专门针对 Xterm 终端内部的滚动条微调 */
+.xterm-viewport::-webkit-scrollbar {
+  width: 12px;
+}
+.xterm-viewport::-webkit-scrollbar-track {
+  background-color: #0f172a; /* 必须和终端背景色一致，否则会有白边 */
+}
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background-color: #1e293b; /* 比全局稍微深一点，更低调 */
+  border: none; /* 终端里不需要圆角和边框，显得更极客 */
+  border-radius: 0;
+}
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background-color: #334155;
+}
+
+/* 4. 隐藏右下角的拖拽调整大小图标 (如果出现的话) */
+::-webkit-scrollbar-corner {
+  background: #0f172a;
+}
