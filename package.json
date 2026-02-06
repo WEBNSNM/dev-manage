@@ -46,11 +46,19 @@
   "keywords": [],
   "license": "ISC",
   "type": "commonjs",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild", 
+      "cpu-features",
+      "ssh2"
+    ]
+  },
   "devDependencies": {
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^40.1.0",
-    "electron-builder": "^26.7.0"
+    "electron": "^33.0.0", 
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "cors": "^2.8.6",

@@ -3,7 +3,8 @@ name: Build Electron App
 on:
   push:
     branches: [ main ]
-
+    tags:
+      - 'v*' # 只有推送到 v1.0.0, v1.0.1 这种标签时，才触发 Release
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -53,3 +54,12 @@ jobs:
             dist_electron/*.dmg
           if-no-files-found: warn
           retention-days: 5
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist_electron/*.exe
+            dist_electron/*.dmg
+          # 自动生成 Release 说明，或者你可以自己写
+          generate_release_notes: true
