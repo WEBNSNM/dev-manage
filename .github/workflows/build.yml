@@ -2,47 +2,54 @@ name: Build Electron App
 
 on:
   push:
-    branches: [ main ] # 当推送到 main 分支时触发
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-    
+
     strategy:
+      fail-fast: false # 👈 关键修改：如果一个系统挂了，不要取消另一个系统（方便调试）
       matrix:
-        os: [windows-latest, macos-latest] # 同时在 Windows 和 Mac 虚拟机上跑
+        os: [windows-latest, macos-latest]
 
     steps:
+      # 1. 检出代码 (升级到 v4)
       - name: Check out Git repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
+      # 2. 安装 Node 环境 (升级到 v4)
       - name: Install Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      # 1. 安装前端依赖并构建
+      # 3. 构建前端
       - name: Build Frontend
         run: |
           cd client
           npm install
           npm run build
       
-      # 2. 安装根目录依赖
+      # 4. 安装根目录依赖
       - name: Install Root Dependencies
         run: npm install
 
-      # 3. 执行 Electron 打包
+      # 5. 执行打包 (关键修复：跳过 Mac 签名)
       - name: Build Electron App
         run: npm run dist
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 这是一个内置 token，无需配置
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 👇👇👇 核心修复：告诉 Mac 不要尝试寻找证书，制作免签名包
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      # 4. 把打出来的包上传到 GitHub 供你下载
+      # 6. 上传产物 (升级到 v4)
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: DevMaster-${{ matrix.os }}
           path: |
             dist_electron/*.exe
             dist_electron/*.dmg
+          if-no-files-found: warn
+          retention-days: 5

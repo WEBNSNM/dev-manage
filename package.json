@@ -28,7 +28,8 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "client/dist/favicon.ico"
+      "icon": "client/dist/favicon.ico",
+      "category": "public.app-category.developer-tools"
     },
     "dmg": {
       "title": "DevMaster Installer"

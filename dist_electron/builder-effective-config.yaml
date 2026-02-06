@@ -9,6 +9,12 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+mac:
+  target: dmg
+  icon: client/dist/favicon.ico
+  category: public.app-category.developer-tools
+dmg:
+  title: DevMaster Installer
 files:
   - filter:
       - main.js
