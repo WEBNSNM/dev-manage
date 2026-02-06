@@ -1,0 +1,20 @@
+directories:
+  output: dist_electron
+  buildResources: build
+appId: com.devmaster.app
+productName: DevMaster
+win:
+  target: nsis
+  icon: client/dist/favicon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+files:
+  - filter:
+      - main.js
+      - server/**/*
+      - client/dist/**/*
+      - package.json
+      - '!server/node_modules'
+asar: true
+electronVersion: 40.1.0

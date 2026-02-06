@@ -3,7 +3,8 @@ import { ref, onMounted, computed, watch } from 'vue'
 import io from 'socket.io-client'
 import TerminalView from './components/TerminalView.vue'
 
-const socket = io('http://localhost:3000')
+const socketURL = import.meta.env.DEV ? 'http://localhost:3000' : undefined;
+const socket = io(socketURL);
 
 // --- 状态管理 ---
 const currentPath = ref('')
@@ -43,13 +44,21 @@ const visibleProjects = computed(() => {
   return rawProjects.value.filter(p => !hiddenProjectNames.value.has(p.name))
 })
 
-// 📊 新增：项目统计
+// 📊 现有：项目总数统计
 const projectCountLabel = computed(() => {
-  const total = rawProjects.value.length
-  const visible = visibleProjects.value.length
-  if (total === visible) return `${total}`
-  return `${visible} / ${total}`
-})
+  const total = rawProjects.value.length;
+  const visible = visibleProjects.value.length;
+  if (total === visible) return `${total}`;
+  return `${visible} / ${total}`;
+});
+
+// 🔥 新增：正在运行的项目数量统计
+const runningProjectCount = computed(() => {
+  return rawProjects.value.filter(p => {
+    // 检查 runningScripts 对象里有没有任意一个值为 true
+    return p.runningScripts && Object.values(p.runningScripts).some(isRunning => isRunning === true);
+  }).length;
+});
 
 // --- Socket 监听 ---
 socket.on('folder-selected', path => {
@@ -60,21 +69,36 @@ socket.on('folder-selected', path => {
   isScanning.value = true
 })
 
-socket.on('projects-loaded', data => {
-  console.log('项目列表已加载')
-  // 关闭 Loading
-  isScanning.value = false
+// client/src/App.vue
 
-  // 状态合并逻辑
+// ...
+
+// 监听项目列表加载
+socket.on('projects-loaded', (data) => {
+  console.log('项目列表已加载 (含状态同步)');
+  isScanning.value = false;
+  
+  // 逻辑优化：
+  // 1. 如果是刷新页面，data 里的 runningScripts 包含后端同步过来的真实状态。
+  // 2. 如果是前端手动点扫描，我们需要合并状态（虽然现在后端已经做了合并，但前端保险起见可以全量更新）。
+  
   rawProjects.value = data.map(p => {
-    const exist = rawProjects.value.find(old => old.name === p.name)
-    return { ...p, running: exist ? exist.running : false }
-  })
-})
+    // 这里的 p.runningScripts 已经是后端根据实际进程计算好的了
+    // 所以直接用后端的数据即可，不需要再费劲去合并前端的旧数据了
+    return { 
+      ...p, 
+      runningScripts: p.runningScripts || {} 
+    };
+  });
+});
 
-socket.on('status-change', ({ name, running }) => {
+// 监听状态变化 (粒度细化到 script)
+socket.on('status-change', ({ name, script, running }) => {
   const p = rawProjects.value.find(x => x.name === name)
-  if (p) p.running = running
+  if (p) {
+    if (!p.runningScripts) p.runningScripts = {}
+    p.runningScripts[script] = running // 记录具体的脚本状态
+  }
 })
 
 socket.on('log', ({ name, data }) => {
@@ -107,24 +131,45 @@ const toggleHideProject = p => {
 }
 
 // 传递 runner 给后端
+// ...
 const runScript = (p, script) => {
-  projectLogs.value[p.name] = []
-  // ✨ 增加 runner 字段
+  // 注意：这里不再清空日志，因为 build 和 dev 可能同时在输出
+  // 如果你希望 build 时清屏，可以根据 script 判断
+  const devMap = ['dev', 'develop', 'start', 'serve', 'server', 'test']
+  if (devMap.some(it => it === script)) {
+    projectLogs.value[p.name] = []
+  }
+
   socket.emit('start-task', {
     projectName: p.name,
     script,
     projectPath: p.path,
-    runner: p.runner // <--- 关键
+    runner: p.runner
   })
 }
 
-const stopScript = p => {
-  socket.emit('stop-task', p.name)
-  p.running = false
-}
+// 强制停止
+const stopScript = (p) => {
+  // 发送指令给后端
+  socket.emit('stop-task', p.name);
+  
+  // ⚡ 前端立即清空该项目所有脚本的运行状态
+  // 这样用户点击瞬间就能看到反馈，不用等后端回调
+  if (p.runningScripts) {
+      // 将所有脚本的状态置为 false
+      Object.keys(p.runningScripts).forEach(key => {
+          p.runningScripts[key] = false;
+      });
+  }
+};
 
 const handleOpenFile = uri => {
   socket.emit('open-file', uri)
+}
+
+// 打开项目文件夹
+const openProjectFolder = path => {
+  socket.emit('open-project-folder', path)
 }
 
 // 根据包管理器返回颜色样式
@@ -203,22 +248,28 @@ const getRunnerBadgeStyle = runner => {
       </div>
 
       <div class="flex items-center self-end gap-4 ml-0 md:ml-4 md:self-auto">
-        <div
-          class="flex items-center gap-2 px-3 py-1 font-mono text-xs text-gray-400 bg-gray-900 border border-gray-700 rounded-full"
-        >
-          <span>Total:</span>
-          <span class="font-bold text-blue-400">{{ projectCountLabel }}</span>
+        
+        <div class="flex items-center gap-2 px-3 py-1 font-mono text-xs text-gray-400 transition-colors bg-gray-900 border border-gray-700 rounded-full"
+             :class="{'border-green-900/50 bg-green-900/10': runningProjectCount > 0}">
+           
+           <div :class="['w-2 h-2 rounded-full transition-all duration-500', 
+               runningProjectCount > 0 ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)] animate-pulse' : 'bg-gray-600']">
+           </div>
+           
+           <span>Running:</span>
+           <span :class="['font-bold transition-colors', runningProjectCount > 0 ? 'text-green-400' : 'text-gray-500']">
+             {{ runningProjectCount }}
+           </span>
         </div>
 
-        <label
-          class="flex items-center gap-2 transition cursor-pointer select-none hover:text-gray-300"
-        >
-          <input
-            type="checkbox"
-            v-model="showHidden"
-            class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-0"
-          />
-          <span class="text-xs text-gray-400">显示已隐藏</span>
+        <div class="flex items-center gap-2 px-3 py-1 font-mono text-xs text-gray-400 bg-gray-900 border border-gray-700 rounded-full">
+           <span>Total:</span>
+           <span class="font-bold text-blue-400">{{ projectCountLabel }}</span>
+        </div>
+
+        <label class="flex items-center gap-2 transition cursor-pointer select-none hover:text-gray-300">
+            <input type="checkbox" v-model="showHidden" class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-0">
+            <span class="text-xs text-gray-400">显示已隐藏</span>
         </label>
       </div>
     </div>
@@ -252,12 +303,11 @@ const getRunnerBadgeStyle = runner => {
             class="flex items-center justify-between p-3 pl-4 bg-gray-800 border-b border-gray-700 rounded-t-lg"
           >
             <div class="flex items-center gap-3 overflow-hidden">
-              <div
-                :class="[
-                  'w-2.5 h-2.5 rounded-full transition-all duration-300',
-                  p.running ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-600'
-                ]"
-              ></div>
+              <div :class="['w-2.5 h-2.5 rounded-full transition-all duration-300', 
+                  (p.runningScripts && Object.values(p.runningScripts).some(Boolean)) 
+                  ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' 
+                  : 'bg-gray-600']">
+              </div>
 
               <div class="flex flex-col overflow-hidden">
                 <div class="flex items-center gap-2">
@@ -277,9 +327,34 @@ const getRunnerBadgeStyle = runner => {
                   </span>
                 </div>
 
-                <span class="text-[10px] text-gray-500 truncate" :title="p.path">{{
-                  p.path.split(/[\\/]/).slice(-2).join('/')
-                }}</span>
+                <div class="flex items-center min-w-0 gap-1 text-gray-500">
+                  <span class="text-[10px] truncate hover:text-gray-300 transition">
+                    {{ p.path.split(/[\\/]/).slice(-2).join('/') }}
+                  </span>
+
+                  <button
+                    @click.stop="openProjectFolder(p.path)"
+                    title="在资源管理器中打开"
+                    class="p-1 text-gray-500 transition rounded hover:bg-gray-700 hover:text-blue-400 shrink-0"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 2H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"
+                      ></path>
+                      <path d="M2 10h20"></path>
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               <span
@@ -336,10 +411,18 @@ const getRunnerBadgeStyle = runner => {
               v-for="(cmd, key) in p.scripts"
               :key="key"
               @click="runScript(p, key)"
-              :disabled="p.running"
-              class="px-3 py-1 text-xs font-bold text-white transition bg-blue-600 border border-transparent rounded shadow-sm hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed hover:border-blue-400"
+              :disabled="p.runningScripts?.[key]"
+              :class="[
+                'px-3 py-1 text-xs font-bold rounded transition text-white shadow-sm border border-transparent',
+                p.runningScripts?.[key]
+                  ? 'bg-green-600 cursor-default opacity-80' /* 运行中：变绿，不可点 */
+                  : 'bg-blue-600 hover:bg-blue-500 hover:border-blue-400' /* 未运行：蓝色，可点 */
+              ]"
             >
-              {{ key }}
+              <span v-if="p.runningScripts?.[key]" class="flex items-center gap-1">
+                <span class="animate-pulse">●</span> {{ key }}
+              </span>
+              <span v-else>{{ key }}</span>
             </button>
 
             <div class="flex-1"></div>

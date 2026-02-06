@@ -9,6 +9,15 @@ const { spawn, exec } = require('child_process');
 const app = express();
 app.use(cors());
 
+const clientDistPath = path.join(__dirname, '../client/dist');
+console.log('🎨 前端静态资源路径:', clientDistPath);
+// 👇 2. 托管静态文件 (加个判断，防止报错)
+if (fs.existsSync(clientDistPath)) {
+    app.use(express.static(clientDistPath));
+} else {
+    console.warn('⚠️ 警告: 未找到前端 build 目录，网页可能无法访问。请确保执行了 npm run build');
+}
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -21,26 +30,33 @@ const io = new Server(server, {
 const processes = new Map();
 
 // --- 🛠️ 核心工具：强力杀进程函数 ---
-const killProcessTree = (child, projectName) => {
-  if (!child) return;
+const killProcessTree = (child, taskKey) => {
+  if (!child || !child.pid) return;
+
+  console.log(`💀 [KILL] 正在终止任务: ${taskKey} (PID: ${child.pid})`);
 
   try {
     if (process.platform === 'win32') {
-      // Windows: 使用 taskkill 杀掉进程树 (/T) 和 强制杀 (/F)
-      // child.pid 是父进程(cmd/npm)，我们需要连带杀掉它启动的 node/vite
-      if (child.pid) {
-          exec(`taskkill /pid ${child.pid} /f /t`, (err) => {
-              if(err) console.log(`[Kill] Windows 杀进程可能有残留或已结束: ${err.message}`);
-          });
-      }
+      // 🪟 Windows: 使用 taskkill 强制(/f) 杀掉进程树(/t)
+      // spawn('taskkill', ...) 这种方式有时会失败，exec 更稳
+      exec(`taskkill /pid ${child.pid} /f /t`, (err) => {
+        // 忽略 "没有找到进程" 的错误，说明已经死了
+        if (err && !err.message.includes('not found')) {
+            console.error(`[Kill Error] Windows: ${err.message}`);
+        }
+      });
     } else {
-      // Mac/Linux: 杀掉进程组
-      // 注意：spawn 时需要 detached: true 才能杀进程组，但在 shell:true 模式下通常直接 kill 也可以
-      child.kill('SIGKILL');
+      // 🍎🐧 Mac/Linux: 杀掉进程组
+      // 注意：spawn 时必须设置 detached: true，否则无法作为组来杀
+      try {
+        process.kill(-child.pid, 'SIGKILL'); // PID 前加负号表示杀进程组
+      } catch (e) {
+        // 忽略 ESRCH (进程已不存在)
+        if (e.code !== 'ESRCH') console.error(`[Kill Error] Unix: ${e.message}`);
+      }
     }
-    console.log(`💀 已终止进程: ${projectName}`);
   } catch (e) {
-    console.error(`❌ 杀进程失败:`, e);
+    console.error(`❌ 杀进程异常:`, e);
   }
 };
 
@@ -129,38 +145,62 @@ io.on('connection', (socket) => {
   });
 
   // 2. 扫描目录
+  // --- 2. 扫描目录 (并在扫描时同步运行状态) ---
   socket.on('scan-dir', (dirPath) => {
+    // 1. 获取静态文件列表
     const projects = scanProjects(dirPath);
     
-    // 扫描后，检查一下哪些项目实际上还在 processes 内存里跑着
-    // 防止前端刷新后状态丢失
-    const enrichedProjects = projects.map(p => ({
-        ...p,
-        running: processes.has(p.name) // 恢复运行状态
-    }));
+    // 2. [关键步骤] 拿着静态列表去 processes Map 里对账
+    // 目的是：刷新页面后，前端能知道哪些脚本还在跑
+    const enrichedProjects = projects.map(p => {
+        const runningScripts = {};
+        
+        // 遍历后端内存中所有正在运行的任务 key (例如 "MyProject:dev")
+        for (const [taskKey] of processes) {
+            // 检查这个任务是不是属于当前项目
+            // 格式约定: "项目名:脚本名"
+            if (taskKey.startsWith(`${p.name}:`)) {
+                const scriptName = taskKey.split(':')[1];
+                if (scriptName) {
+                    runningScripts[scriptName] = true;
+                }
+            }
+        }
+
+        return {
+            ...p,
+            runningScripts // 把同步好的状态带给前端
+        };
+    });
     
+    // 3. 发送带有运行状态的列表
     socket.emit('projects-loaded', enrichedProjects);
   });
 
-  // 3. 启动任务
+// --- 3. 启动任务 (支持并发) ---
   socket.on('start-task', ({ projectName, script, projectPath, runner }) => {
-    const currentRunner = runner || 'npm';
-    if (processes.has(projectName)) return;
+    const taskKey = `${projectName}:${script}`;
+    if (processes.has(taskKey)) return;
 
-    console.log(`🚀 [后端] 启动: ${projectName} (${currentRunner} run ${script})`);
+    const currentRunner = runner || 'npm';
+    console.log(`🚀 [后端] 启动: ${taskKey}`);
     
     let cmd = currentRunner;
     if (process.platform === 'win32') cmd = `${currentRunner}.cmd`;
 
+    // 🌟 关键修改：Mac/Linux 开启 detached 以便后续杀进程组
+    const isWin = process.platform === 'win32';
+    
     const child = spawn(cmd, ['run', script], {
       cwd: projectPath,
-      shell: true,
+      shell: true, // Windows 必须 true
+      detached: !isWin, // 🌟 非 Windows 开启独立进程组
       stdio: 'pipe', 
       env: { ...process.env, FORCE_COLOR: '1' } 
     });
 
-    processes.set(projectName, child);
-    io.emit('status-change', { name: projectName, running: true });
+    processes.set(taskKey, child);
+    io.emit('status-change', { name: projectName, script, running: true });
 
     const logHandler = (data) => io.emit('log', { name: projectName, data: data.toString() });
     child.stdout.on('data', logHandler);
@@ -171,30 +211,37 @@ io.on('connection', (socket) => {
     });
 
     child.on('close', (code) => {
-      // 只有当 Map 里还有这个进程时才广播停止 (防止是手动 Kill 触发的重复广播)
-      if (processes.has(projectName)) {
-          processes.delete(projectName);
-          io.emit('status-change', { name: projectName, running: false });
-          io.emit('log', { name: projectName, data: `\r\n[Exited with code ${code}]\r\n` });
+      if (processes.has(taskKey)) {
+          processes.delete(taskKey);
+          io.emit('status-change', { name: projectName, script, running: false });
+          io.emit('log', { name: projectName, data: `\r\n[${script} exited with code ${code}]\r\n` });
       }
     });
   });
 
-  // 4. 停止任务
+  // --- 4. 停止任务 (杀死该项目下的所有进程) ---
   socket.on('stop-task', (projectName) => {
-    console.log(`🛑 [指令] 停止项目: ${projectName}`);
-    const child = processes.get(projectName);
+    console.log(`🛑 [指令] 强杀项目: ${projectName}`);
     
-    // 无论找不找得到句柄，都先通知前端变红，防止UI卡死
-    processes.delete(projectName);
-    socket.emit('status-change', { name: projectName, running: false });
+    // 转换为数组进行遍历，防止在遍历中删除 Map 导致的问题
+    const activeTasks = Array.from(processes.entries());
 
-    if (child) {
-        killProcessTree(child, projectName);
-        socket.emit('log', { name: projectName, data: '\r\n\x1b[31m[用户手动停止]\x1b[0m\r\n' });
-    } else {
-        socket.emit('log', { name: projectName, data: '\r\n[警告] 进程句柄已丢失，已重置状态\r\n' });
+    for (const [key, child] of activeTasks) {
+        // 匹配 "ProjectName:dev", "ProjectName:build"
+        if (key.startsWith(`${projectName}:`)) {
+            const scriptName = key.split(':')[1];
+            
+            // 1. 先从内存移除
+            processes.delete(key);
+            
+            // 2. 立即通知前端变红 (UI 响应优先)
+            socket.emit('status-change', { name: projectName, script: scriptName, running: false });
+            
+            // 3. 执行系统级查杀
+            killProcessTree(child, key);
+        }
     }
+    socket.emit('log', { name: projectName, data: '\r\n\x1b[31m[ ☠️ 已执行强制终止指令 ]\x1b[0m\r\n' });
   });
 
   // 5. 打开文件 (VS Code)
@@ -204,6 +251,32 @@ io.on('connection', (socket) => {
       exec(`code -g "${filePath}"`, (err) => {
           if (err) exec(`explorer /select,"${filePath.split(':')[0]}"`); // 降级方案
       });
+  });
+
+  // --- 打开项目所在的文件夹 (资源管理器) ---
+  socket.on('open-project-folder', (projectPath) => {
+    console.log('📂 请求打开文件夹:', projectPath);
+    
+    if (!projectPath) return;
+
+    let cmd;
+    // 根据不同系统选择命令
+    if (process.platform === 'win32') {
+      // Windows: explorer "C:\path\to\folder"
+      cmd = `explorer "${projectPath}"`;
+    } else if (process.platform === 'darwin') {
+      // Mac: open "/path/to/folder"
+      cmd = `open "${projectPath}"`;
+    } else {
+      // Linux: xdg-open "/path/to/folder"
+      cmd = `xdg-open "${projectPath}"`;
+    }
+
+    exec(cmd, (err) => {
+      if (err) {
+        console.error('打开文件夹失败:', err);
+      }
+    });
   });
 });
 
@@ -217,9 +290,10 @@ const cleanup = () => {
     }
 
     // 遍历所有正在运行的进程并杀掉
-    for (const [name, child] of processes) {
-        console.log(`正在终止: ${name}...`);
-        killProcessTree(child, name);
+    for (const [key, child] of processes) {
+        // key 可能是 "Project:dev"
+        console.log(`正在终止: ${key}...`);
+        killProcessTree(child, key);
     }
     
     // 给一点点时间让 taskkill 执行完
@@ -234,7 +308,24 @@ process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 // ----------------------------------------
 
-server.listen(3000, () => {
-  console.log('✅ DevMaster 服务已启动: http://localhost:3000');
-  console.log('👉 按 Ctrl+C 关闭服务 (会自动清理子进程)');
+// 👇 2. 在文件最底部，server.listen 之前，添加“兜底路由”
+// 作用：无论用户访问什么 URL，如果不是 API，都返回 index.html (支持 Vue Router history 模式)
+app.get(/.*/, (req, res) => {
+    const indexPath = path.join(clientDistPath, 'index.html');
+    
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+    } else {
+        res.status(404).send('Backend is running, but index.html not found.');
+    }
 });
+
+// 判断：如果是直接通过 node server/index.js 运行的 -> 启动 3000 端口
+if (require.main === module) {
+    server.listen(3000, () => {
+        console.log('✅ 开发模式运行中...', `localhost://3000`);
+    });
+}
+
+// 必须导出 server，让 main.js 去控制启动
+module.exports = server;
