@@ -5,17 +5,17 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const { spawn, exec } = require('child_process');
+// ⚠️ 注意：这里假设你的 monitor.js 在 utils 目录下
+// 如果你的 monitor.js 在 server 根目录，请改为 require('./monitor')
+const monitor = require('./utils/monitor'); 
 
 const app = express();
 app.use(cors());
 
 const clientDistPath = path.join(__dirname, '../client/dist');
-console.log('🎨 前端静态资源路径:', clientDistPath);
-// 👇 2. 托管静态文件 (加个判断，防止报错)
+
 if (fs.existsSync(clientDistPath)) {
     app.use(express.static(clientDistPath));
-} else {
-    console.warn('⚠️ 警告: 未找到前端 build 目录，网页可能无法访问。请确保执行了 npm run build');
 }
 
 const server = http.createServer(app);
@@ -26,46 +26,31 @@ const io = new Server(server, {
   }
 });
 
-// 存储运行中的子进程: Map<projectName, ChildProcess>
+// ✅ 1. 启动监控循环
+monitor.startLoop(io);
+
+// 存储运行中的子进程: Map<taskKey, ChildProcess>
 const processes = new Map();
 
-// --- 🛠️ 核心工具：强力杀进程函数 ---
+// --- 工具函数 ---
 const killProcessTree = (child, taskKey) => {
   if (!child || !child.pid) return;
-
-  console.log(`💀 [KILL] 正在终止任务: ${taskKey} (PID: ${child.pid})`);
-
+  console.log(`💀 [KILL] 正在终止: ${taskKey} (PID: ${child.pid})`);
   try {
     if (process.platform === 'win32') {
-      // 🪟 Windows: 使用 taskkill 强制(/f) 杀掉进程树(/t)
-      // spawn('taskkill', ...) 这种方式有时会失败，exec 更稳
       exec(`taskkill /pid ${child.pid} /f /t`, (err) => {
-        // 忽略 "没有找到进程" 的错误，说明已经死了
-        if (err && !err.message.includes('not found')) {
-            console.error(`[Kill Error] Windows: ${err.message}`);
-        }
+         if (err && !err.message.includes('not found')) console.error(err.message);
       });
     } else {
-      // 🍎🐧 Mac/Linux: 杀掉进程组
-      // 注意：spawn 时必须设置 detached: true，否则无法作为组来杀
-      try {
-        process.kill(-child.pid, 'SIGKILL'); // PID 前加负号表示杀进程组
-      } catch (e) {
-        // 忽略 ESRCH (进程已不存在)
-        if (e.code !== 'ESRCH') console.error(`[Kill Error] Unix: ${e.message}`);
-      }
+      process.kill(-child.pid, 'SIGKILL');
     }
-  } catch (e) {
-    console.error(`❌ 杀进程异常:`, e);
-  }
+  } catch (e) { console.error(e); }
 };
 
-// --- 递归扫描核心逻辑 (含包管理器识别) ---
 const scanRecursively = (currentPath, depth = 0) => {
   if (depth > 4) return [];
   const folderName = path.basename(currentPath);
-  
-  if (['node_modules', '.git', 'dist', 'build', '.idea', '.vscode', 'public', 'uni_modules', 'static'].includes(folderName)) {
+if (['node_modules', '.git', 'dist', 'build', '.idea', '.vscode', 'public', 'uni_modules', 'static'].includes(folderName)) {
     return [];
   }
 
@@ -76,9 +61,7 @@ const scanRecursively = (currentPath, depth = 0) => {
       let runner = 'npm'; 
       if (fs.existsSync(path.join(currentPath, 'pnpm-lock.yaml'))) runner = 'pnpm';
       else if (fs.existsSync(path.join(currentPath, 'yarn.lock'))) runner = 'yarn';
-      else if (fs.existsSync(path.join(currentPath, 'bun.lockb'))) runner = 'bun';
-
-      // console.log(`✅ 发现项目 [${runner}]: ${folderName}`);
+      
       return [{
         name: folderName,
         path: currentPath,
@@ -100,19 +83,15 @@ const scanRecursively = (currentPath, depth = 0) => {
   return results;
 };
 
-// 封装扫描入口
 const scanProjects = (dirPath) => {
-  console.log(`\n🔍 开始深度扫描: ${dirPath}`);
   if (!fs.existsSync(dirPath)) return [];
-  const results = scanRecursively(dirPath);
-  console.log(`📊 扫描结束，共找到 ${results.length} 个项目`);
-  return results;
+  return scanRecursively(dirPath);
 };
 
+// --- Socket 逻辑 ---
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
-
-  // 1. 弹窗选择文件夹 (Base64 PowerShell)
+// 1. 弹窗选择文件夹 (Base64 PowerShell)
   socket.on('open-folder-dialog', () => {
     console.log('正在唤起置顶弹窗...');
     const psScript = `
@@ -144,104 +123,112 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 2. 扫描目录
-  // --- 2. 扫描目录 (并在扫描时同步运行状态) ---
+  // 1. 扫描目录
   socket.on('scan-dir', (dirPath) => {
-    // 1. 获取静态文件列表
     const projects = scanProjects(dirPath);
-    
-    // 2. [关键步骤] 拿着静态列表去 processes Map 里对账
-    // 目的是：刷新页面后，前端能知道哪些脚本还在跑
+    // 同步运行状态
     const enrichedProjects = projects.map(p => {
         const runningScripts = {};
-        
-        // 遍历后端内存中所有正在运行的任务 key (例如 "MyProject:dev")
         for (const [taskKey] of processes) {
-            // 检查这个任务是不是属于当前项目
-            // 格式约定: "项目名:脚本名"
             if (taskKey.startsWith(`${p.name}:`)) {
-                const scriptName = taskKey.split(':')[1];
-                if (scriptName) {
-                    runningScripts[scriptName] = true;
-                }
+                runningScripts[taskKey.split(':')[1]] = true;
             }
         }
-
-        return {
-            ...p,
-            runningScripts // 把同步好的状态带给前端
-        };
+        return { ...p, runningScripts };
     });
-    
-    // 3. 发送带有运行状态的列表
     socket.emit('projects-loaded', enrichedProjects);
   });
 
-// --- 3. 启动任务 (支持并发) ---
+  // 2. 启动任务 (核心修改：加入监控)
   socket.on('start-task', ({ projectName, script, projectPath, runner }) => {
     const taskKey = `${projectName}:${script}`;
     if (processes.has(taskKey)) return;
 
     const currentRunner = runner || 'npm';
-    console.log(`🚀 [后端] 启动: ${taskKey}`);
+    console.log(`🚀 启动任务: ${taskKey}`);
     
     let cmd = currentRunner;
     if (process.platform === 'win32') cmd = `${currentRunner}.cmd`;
 
-    // 🌟 关键修改：Mac/Linux 开启 detached 以便后续杀进程组
-    const isWin = process.platform === 'win32';
-    
     const child = spawn(cmd, ['run', script], {
       cwd: projectPath,
-      shell: true, // Windows 必须 true
-      detached: !isWin, // 🌟 非 Windows 开启独立进程组
+      shell: true,
+      detached: process.platform !== 'win32',
       stdio: 'pipe', 
       env: { ...process.env, FORCE_COLOR: '1' } 
     });
 
     processes.set(taskKey, child);
+    
+    if (child.pid) {
+      // 注意：这里用 taskKey (如 VueAdmin:dev) 作为 ID
+      monitor.addMonitor(taskKey, child.pid);
+      console.log(`➕ 已添加监控: ${taskKey}, PID: ${child.pid}`);
+    }
+
     io.emit('status-change', { name: projectName, script, running: true });
 
     const logHandler = (data) => io.emit('log', { name: projectName, data: data.toString() });
     child.stdout.on('data', logHandler);
     child.stderr.on('data', logHandler);
-
     child.on('error', (err) => {
        io.emit('log', { name: projectName, data: `❌ 启动失败: ${err.message}` });
     });
 
     child.on('close', (code) => {
       if (processes.has(taskKey)) {
+          // ✅ 进程退出，移除监控
+          monitor.removeMonitor(taskKey);
           processes.delete(taskKey);
           io.emit('status-change', { name: projectName, script, running: false });
-          io.emit('log', { name: projectName, data: `\r\n[${script} exited with code ${code}]\r\n` });
+          io.emit('log', { name: projectName, data: `\n[Exited with code ${code}]\n` });
       }
     });
   });
 
-  // --- 4. 停止任务 (杀死该项目下的所有进程) ---
+  // 3. 停止任务
+  // --- 4. 停止任务 (修复版) ---
   socket.on('stop-task', (projectName) => {
-    console.log(`🛑 [指令] 强杀项目: ${projectName}`);
+    console.log(`🛑 [收到指令] 请求停止项目: ${projectName}`);
     
-    // 转换为数组进行遍历，防止在遍历中删除 Map 导致的问题
-    const activeTasks = Array.from(processes.entries());
+    // 1. 先把 Map 转成数组，防止在遍历时修改 Map 导致循环中断
+    const allTasks = Array.from(processes.entries());
+    let found = false;
 
-    for (const [key, child] of activeTasks) {
-        // 匹配 "ProjectName:dev", "ProjectName:build"
+    for (const [key, child] of allTasks) {
+        // key 的格式是 "项目名:脚本名" (例如 "VueAdmin:dev")
+        // 所以我们检查 key 是否以 "VueAdmin:" 开头
         if (key.startsWith(`${projectName}:`)) {
+            found = true;
             const scriptName = key.split(':')[1];
+            console.log(`   - 匹配到任务: ${key} (PID: ${child.pid})，正在终止...`);
+
+            // 2. 移除监控
+            try {
+              monitor.removeMonitor(key);
+            } catch (e) {
+              console.error('   - 移除监控失败:', e.message);
+            }
             
-            // 1. 先从内存移除
+            // 3. 从内存移除
             processes.delete(key);
             
-            // 2. 立即通知前端变红 (UI 响应优先)
+            // 4. 通知前端变红
             socket.emit('status-change', { name: projectName, script: scriptName, running: false });
             
-            // 3. 执行系统级查杀
+            // 5. 杀进程
             killProcessTree(child, key);
         }
     }
-    socket.emit('log', { name: projectName, data: '\r\n\x1b[31m[ ☠️ 已执行强制终止指令 ]\x1b[0m\r\n' });
+
+    if (!found) {
+        console.warn(`⚠️ 未找到项目 [${projectName}] 的任何运行任务。当前运行列表:`, Array.from(processes.keys()));
+        // 强制告诉前端：这个项目没在跑，把它变红（防止前端卡在绿色状态）
+        // 既然找不到具体的 script，我们无法精确变红，但通常这意味着后端重启过
+        // 你可以选择发一个特殊的事件重置前端，或者忽略
+    } else {
+        socket.emit('log', { name: projectName, data: '\r\n\x1b[31m[ ☠️ 已执行强制终止指令 ]\x1b[0m\r\n' });
+    }
   });
 
   // 5. 打开文件 (VS Code)
@@ -252,7 +239,6 @@ io.on('connection', (socket) => {
           if (err) exec(`explorer /select,"${filePath.split(':')[0]}"`); // 降级方案
       });
   });
-
   // --- 打开项目所在的文件夹 (资源管理器) ---
   socket.on('open-project-folder', (projectPath) => {
     console.log('📂 请求打开文件夹:', projectPath);
@@ -303,11 +289,7 @@ const cleanup = () => {
     }, 500);
 };
 
-// 监听 Ctrl+C (SIGINT) 和 终止信号 (SIGTERM)
 process.on('SIGINT', cleanup);
-process.on('SIGTERM', cleanup);
-// ----------------------------------------
-
 // 👇 2. 在文件最底部，server.listen 之前，添加“兜底路由”
 // 作用：无论用户访问什么 URL，如果不是 API，都返回 index.html (支持 Vue Router history 模式)
 app.get(/.*/, (req, res) => {
@@ -319,13 +301,8 @@ app.get(/.*/, (req, res) => {
         res.status(404).send('Backend is running, but index.html not found.');
     }
 });
-
-// 判断：如果是直接通过 node server/index.js 运行的 -> 启动 3000 端口
 if (require.main === module) {
-    server.listen(3000, () => {
-        console.log('✅ 开发模式运行中...', `localhost://3000`);
-    });
+    server.listen(3000, () => console.log('✅ Server running on 3000'));
 }
 
-// 必须导出 server，让 main.js 去控制启动
 module.exports = server;
