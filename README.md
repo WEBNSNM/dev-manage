@@ -70,10 +70,3 @@ npm run dev
 ```bash
 npm run dist
 ```
-### 5.自动化发布流程
-* 修改代码并提交。
-* 打上版本标签（Tag）：
-```bash
-git tag v1.0.1
-git push origin v1.0.1
-```
