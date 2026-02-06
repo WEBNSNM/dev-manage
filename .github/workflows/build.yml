@@ -1,0 +1,48 @@
+name: Build Electron App
+
+on:
+  push:
+    branches: [ main ] # 当推送到 main 分支时触发
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest] # 同时在 Windows 和 Mac 虚拟机上跑
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      # 1. 安装前端依赖并构建
+      - name: Build Frontend
+        run: |
+          cd client
+          npm install
+          npm run build
+      
+      # 2. 安装根目录依赖
+      - name: Install Root Dependencies
+        run: npm install
+
+      # 3. 执行 Electron 打包
+      - name: Build Electron App
+        run: npm run dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 这是一个内置 token，无需配置
+
+      # 4. 把打出来的包上传到 GitHub 供你下载
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: DevMaster-${{ matrix.os }}
+          path: |
+            dist_electron/*.exe
+            dist_electron/*.dmg
