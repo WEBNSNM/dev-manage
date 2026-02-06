@@ -5,6 +5,8 @@ on:
     branches: [ main ]
     tags:
       - 'v*' # 只有推送到 v1.0.0, v1.0.1 这种标签时，才触发 Release
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ${{ matrix.os }}
