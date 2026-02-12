@@ -64,8 +64,6 @@
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "fix-path": "3.0.0",
-    "highlight.js": "^11.11.1",
-    "markdown-it": "^14.1.0",
     "pidtree": "^0.6.0",
     "pidusage": "^4.0.1",
     "socket.io": "^4.8.3"
