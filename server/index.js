@@ -360,6 +360,91 @@ io.on('connection', (socket) => {
     writeConfigFile(allData); // 写入硬盘
     console.log(`💾 保存配置 [${key}] Success`);
   });
+
+  socket.on('proxy:claude', async ({ message, systemPrompt }, callback) => {
+    // 从配置文件读取当前激活的 AI 配置
+    const allConfig = readConfigFile();
+    const configList = allConfig['ai_config_list'] || [];
+    const activeId = allConfig['ai_active_id'] || '';
+    const aiConfig = configList.find(c => c.id === activeId) || configList[0];
+
+    if (!aiConfig || !aiConfig.baseURL || !aiConfig.apiKey) {
+      return callback({ success: false, error: '请先在设置中配置 AI 模型的 Base URL 和 API Key' });
+    }
+
+    const provider = aiConfig.provider || 'openai';
+    const base = aiConfig.baseURL.replace(/\/+$/, '');
+    const model = aiConfig.model || 'gpt-3.5-turbo';
+    console.log(`🕵️‍♀️ [proxy:claude] provider=${provider}, model=${model}`);
+
+    let url, headers, body;
+
+    if (provider === 'anthropic') {
+      // Anthropic 原生协议 (/v1/messages)
+      url = base + '/v1/messages';
+      headers = {
+        "Content-Type": "application/json",
+        "x-api-key": aiConfig.apiKey,
+        "anthropic-version": "2023-06-01"
+      };
+      body = { model, max_tokens: 4096, messages: [{ role: "user", content: message }] };
+      if (systemPrompt) body.system = systemPrompt;
+    } else if (provider === 'gemini') {
+      // Google Gemini (/v1beta/models/xxx:generateContent)
+      url = `${base}/v1beta/models/${model}:generateContent?key=${aiConfig.apiKey}`;
+      headers = { "Content-Type": "application/json" };
+      const parts = [{ text: message }];
+      if (systemPrompt) parts.unshift({ text: systemPrompt });
+      body = { contents: [{ parts }] };
+    } else {
+      // OpenAI 兼容协议 (openai / deepseek / codex 等)
+      url = base + '/v1/chat/completions';
+      headers = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${aiConfig.apiKey}`
+      };
+      body = { model, messages: [{ role: "user", content: message }], stream: false };
+      if (systemPrompt) body.messages.unshift({ role: "system", content: systemPrompt });
+    }
+
+    try {
+      const response = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+      const rawText = await response.text();
+      console.log(`[Status] ${response.status}`);
+
+      let data;
+      try { data = JSON.parse(rawText); } catch {
+        console.error("❌ 返回非 JSON:", rawText.substring(0, 200));
+        return callback({ success: false, error: "API 返回非 JSON 数据" });
+      }
+
+      if (data.error) {
+        console.error("❌ API 错误:", data.error);
+        return callback({ success: false, error: data.error.message || JSON.stringify(data.error) });
+      }
+
+      // 按 provider 提取内容
+      let content;
+      if (provider === 'anthropic') {
+        content = data.content?.[0]?.text;
+      } else if (provider === 'gemini') {
+        content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      } else {
+        content = data.choices?.[0]?.message?.content;
+      }
+
+      if (content) {
+        console.log("✅ 成功拿到内容！");
+        callback({ success: true, data: content });
+      } else {
+        console.error("❌ 结构异常:", JSON.stringify(data).substring(0, 300));
+        callback({ success: false, error: "返回数据结构异常" });
+      }
+    } catch (e) {
+      console.error("❌ 网络请求失败:", e);
+      callback({ success: false, error: e.message });
+    }
+  });
 });
 
 // --- ✨ 核心修复：监听主进程退出事件 ---

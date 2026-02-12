@@ -123,7 +123,7 @@
           </div>
         </div>
 
-        <TerminalView :id="p.name" :logs="logs[p.name] || []" @open-file="(uri) => $emit('open-file', uri)" />
+        <TerminalView :id="p.name" :logs="logs[p.name] || []" :project-path="p.path" @open-file="(uri) => $emit('open-file', uri)" />
       </div>
     </div>
 
@@ -146,6 +146,14 @@
             placeholder="生成的提交信息将显示在这里..."
           ></textarea>
           
+          <div class="flex items-center gap-2 mb-3 text-xs text-gray-500">
+            <span>由</span>
+            <span class="text-purple-400">{{ activeConfig.name || 'AI' }}</span>
+            <span>·</span>
+            <span class="font-mono text-gray-400">{{ activeConfig.model }}</span>
+            <span>提供</span>
+          </div>
+
           <div class="flex justify-end gap-3">
             <button @click="showGitModal = false" class="px-4 py-2 text-sm text-gray-400 hover:text-white">取消</button>
             <button 
@@ -166,8 +174,11 @@
 <script setup>
 import { ref } from 'vue';
 import TerminalView from './TerminalView.vue'
-import { chatAI } from '../utils/ai' // 引入通用的 AI 工具
+import { callKuyepClaude } from '../utils/ai' // 引入通用的 AI 工具
 import { socket } from "../utils/socket";
+import { useAiConfig } from '../utils/useAiConfig';
+
+const { activeConfig } = useAiConfig();
 
 const props = defineProps({
   projects: { type: Array, default: () => [] },
@@ -210,14 +221,18 @@ const handleAiCommit = (p) => {
     try {
       const systemPrompt = `你是一个资深代码提交助手。
       请根据用户的 git diff 内容，生成一条符合 Angular 规范的 Commit Message。
-      格式要求：<type>(<scope>): <subject>
-      例如：feat(auth): add login page
+      格式要求：<type> <emoji>(<scope>): <subject>
+      type 与 emoji 的对应关系：
+      - feat ✨  - fix 🐛  - docs 📝  - style 💄
+      - refactor ♻️  - perf ⚡️  - test ✅  - build 📦
+      - ci 👷  - chore 🔧  - revert ⏪
+      示例：feat ✨(auth): 新增登录页面
       规则：
       1. 只返回 Message 文本，不要包含 Markdown 代码块。
       2. 语言使用中文。
-      3. 保持简练。`;
+      3. 保持简练，subject 不超过 50 字。`;
 
-      const result = await chatAI(diff, systemPrompt);
+      const result = await callKuyepClaude(diff, systemPrompt);
       commitMessage.value = result.replace(/`/g, '').trim(); // 清理一下可能的多余符号
     } catch (e) {
       commitMessage.value = `feat: update code\n\n(AI 生成失败: ${e.message})`;

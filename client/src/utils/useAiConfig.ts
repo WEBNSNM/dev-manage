@@ -8,6 +8,7 @@ const STORAGE_KEY_ACTIVE = 'ai_active_id';
 const DEFAULT_CONFIG: any = {
   id: 'default',
   name: 'DeepSeek (默认)',
+  provider: 'openai',
   baseURL: 'https://api.deepseek.com',
   apiKey: '',
   model: 'deepseek-chat',

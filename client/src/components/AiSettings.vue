@@ -71,6 +71,15 @@
               </div>
 
               <div>
+                <label class="block mb-1 text-xs text-gray-500">API 协议</label>
+                <select v-model="formData.provider" class="w-full bg-[#252526] border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none transition">
+                  <option value="openai">OpenAI 兼容 (DeepSeek / GPT / Codex 等)</option>
+                  <option value="anthropic">Anthropic (Claude)</option>
+                  <option value="gemini">Google Gemini</option>
+                </select>
+              </div>
+
+              <div>
                 <label class="block mb-1 text-xs text-gray-500">Base URL (API 地址)</label>
                 <input v-model="formData.baseURL" type="text" placeholder="https://api.deepseek.com" class="w-full bg-[#252526] border border-gray-600 rounded px-3 py-2 text-sm text-white font-mono focus:border-blue-500 focus:outline-none transition">
               </div>
@@ -83,11 +92,12 @@
               <div>
                 <label class="block mb-1 text-xs text-gray-500">Model (模型名)</label>
                 <input v-model="formData.model" type="text" placeholder="deepseek-chat" class="w-full bg-[#252526] border border-gray-600 rounded px-3 py-2 text-sm text-white font-mono focus:border-blue-500 focus:outline-none transition">
+                <p class="text-[10px] text-yellow-600 mt-1">⚠️ 模型名称以供应商实际提供的为准，可能与官方命名不同</p>
                 <p class="text-[10px] text-gray-500 mt-1">
-                  常用: 
-                  <span class="text-gray-300 cursor-pointer hover:text-blue-400" @click="formData.model='deepseek-chat'">deepseek-chat</span>, 
-                  <span class="text-gray-300 cursor-pointer hover:text-blue-400" @click="formData.model='gpt-4o'">gpt-4o</span>, 
-                  <span class="text-gray-300 cursor-pointer hover:text-blue-400" @click="formData.model='gpt-3.5-turbo'">gpt-3.5-turbo</span>
+                  常用:
+                  <span class="text-gray-300 cursor-pointer hover:text-blue-400" @click="formData.model='deepseek-chat'">deepseek-chat</span>,
+                  <span class="text-gray-300 cursor-pointer hover:text-blue-400" @click="formData.model='gpt-4o'">gpt-4o</span>,
+                  <span class="text-gray-300 cursor-pointer hover:text-blue-400" @click="formData.model='claude-sonnet-4-20250514'">claude-sonnet-4</span>
                 </p>
               </div>
             </div>
@@ -155,6 +165,7 @@ const handleCreateNew = () => {
   currentEditId.value = 'NEW_TEMP_ID'; // 给个临时 ID 让 UI 高亮
   formData.value = {
     name: 'New Model',
+    provider: 'openai',
     baseURL: 'https://api.openai.com/v1',
     apiKey: '',
     model: 'gpt-3.5-turbo'

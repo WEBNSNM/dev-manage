@@ -4,14 +4,18 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import 'xterm/css/xterm.css';
-import { chatAI } from '../utils/ai'; // 👈 引入 AI 工具
+import { callKuyepClaude } from '../utils/ai'; // 👈 引入 AI 工具
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/atom-one-dark.css'; // 代码高亮样式
+import { useAiConfig } from '../utils/useAiConfig';
+
+const { activeConfig } = useAiConfig();
 
 const props = defineProps({
   id: String,
-  logs: { type: Array, default: () => [] }
+  logs: { type: Array, default: () => [] },
+  projectPath: { type: String, default: '' }
 });
 
 const emit = defineEmits(['open-file']);
@@ -23,6 +27,7 @@ const copySuccess = ref(false);
 const isAnalyzing = ref(false);
 const showAiModal = ref(false);
 const aiResult = ref('');
+const userQuestion = ref('');
 
 // 初始化 Markdown 解析器
 const md = new MarkdownIt({
@@ -109,44 +114,83 @@ const clearLogs = () => {
   writeIndex = props.logs.length; 
 };
 
+// 智能提取日志：优先抓错误行及上下文，过滤噪音
+const extractSmartLogs = (logs) => {
+  const lines = logs.map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return '';
+
+  const errorPattern = /error|fail|exception|fatal|ENOENT|EACCES|TypeError|SyntaxError|ReferenceError|Cannot find|not found|rejected|EPERM/i;
+  const noisePattern = /node_modules|npm warn|npm notice|npm update|progress|downloading|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|\[=+\s*\]/i;
+
+  // 找出所有错误行的索引
+  const errorIndices = [];
+  lines.forEach((line, i) => {
+    if (errorPattern.test(line) && !noisePattern.test(line)) {
+      errorIndices.push(i);
+    }
+  });
+
+  if (errorIndices.length > 0) {
+    // 有错误：取每个错误行的前后 3 行上下文，去重合并
+    const picked = new Set();
+    errorIndices.forEach(idx => {
+      for (let i = Math.max(0, idx - 3); i <= Math.min(lines.length - 1, idx + 3); i++) {
+        picked.add(i);
+      }
+    });
+    const result = [...picked].sort((a, b) => a - b).map(i => lines[i]);
+    // 最多 60 行，避免 token 浪费
+    return result.slice(-60).join('\n');
+  }
+
+  // 无错误：取最后 20 行概况即可
+  return lines.slice(-20).join('\n');
+};
+
 // --- 🤖 AI 诊断功能 ---
 const handleAnalyze = async () => {
-  if (props.logs.length === 0) return;
-  
+  const question = userQuestion.value.trim();
+  const recentLogs = extractSmartLogs(props.logs);
+
+  // 没有日志也没有用户输入，不处理
+  if (!recentLogs && !question) return;
+
   isAnalyzing.value = true;
-  aiResult.value = ''; 
-  
+  aiResult.value = '';
+  showAiModal.value = true;
+
   try {
-    // 1. 获取最近的日志 (取最后 80 行，通常报错信息都在最后)
-    // 过滤掉空行，合并成字符串
-    const recentLogs = props.logs.slice(-80).filter(l => l.trim()).join('\n');
-    
-    if (!recentLogs) {
-      $toast.error('日志为空，无法分析');
-      isAnalyzing.value = false;
-      return;
+    const projectInfo = props.projectPath ? `项目路径: ${props.projectPath}` : '';
+    let systemPrompt, userMessage;
+
+    if (question) {
+      // 用户主动提问模式
+      systemPrompt = `你是一个资深全栈开发专家。
+${projectInfo}
+用户正在开发一个项目，会向你提问或请求帮助。
+请你：
+1. 如果用户提供了控制台日志，结合日志上下文回答。
+2. 如果涉及代码修改，给出具体的代码片段和文件路径建议。
+3. 使用 Markdown 格式回复，语言使用中文。`;
+      userMessage = question + (recentLogs ? `\n\n当前控制台日志:\n${recentLogs}` : '');
+    } else {
+      // 自动诊断模式：优先检测错误
+      systemPrompt = `你是一个资深全栈开发专家。
+${projectInfo}
+用户将提供一段控制台运行日志。
+请你：
+1. 优先检查日志中是否存在错误（error/fail/exception 等），如果有，分析错误原因并给出修复建议。
+2. 如果没有明显错误，简要总结当前运行状态。
+3. 如果涉及代码修改，给出具体的代码片段和文件路径建议。
+4. 使用 Markdown 格式回复，语言使用中文。`;
+      userMessage = recentLogs;
     }
 
-    // 2. 准备 Prompt
-    const systemPrompt = `你是一个资深前端开发专家。
-    用户将提供一段运行时错误日志。
-    请你：
-    1. 用简练的中文解释错误原因。
-    2. 直接给出修复建议或代码片段。
-    3. 使用 Markdown 格式回复。
-    4. 如果日志没有明显错误，请告知用户。`;
-
-    // 3. 打开弹窗
-    showAiModal.value = true;
-    
-    // 4. 调用通用的 AI 接口
-    const result = await chatAI(recentLogs, systemPrompt);
+    const result = await callKuyepClaude(userMessage, systemPrompt);
     aiResult.value = result;
-
+    userQuestion.value = '';
   } catch (error) {
     aiResult.value = `### ❌ 分析失败\n\n${error.message}\n\n请检查 API Key 配置（点击右上角配置）。`;
-    // 如果是因为没 Key，弹窗还是要打开让用户看提示
-    showAiModal.value = true;
   } finally {
     isAnalyzing.value = false;
   }
@@ -239,18 +283,26 @@ onBeforeUnmount(() => { term?.dispose(); resizeObserver.disconnect(); });
        </span>
     </div>
 
-    <div class="absolute z-10 flex gap-2 transition-opacity duration-200 opacity-0 top-2 right-4 group-hover:opacity-100">
-      
+    <div class="absolute z-10 flex items-center gap-2 transition-opacity duration-200 opacity-0 top-2 right-4 group-hover:opacity-100">
+
       <span v-if="copySuccess" class="px-2 py-1 text-xs text-green-400 border rounded bg-black/50 fade-in border-green-500/30">
         ✅ 已复制
       </span>
 
-      <button 
-        @click="handleAnalyze" 
-        :disabled="isAnalyzing || logs.length === 0"
+      <input
+        v-model="userQuestion"
+        @keyup.enter="handleAnalyze"
+        type="text"
+        placeholder="向 AI 提问..."
+        class="w-40 px-2 py-1 text-xs text-white transition border rounded bg-gray-800/80 border-gray-600 backdrop-blur-sm focus:border-purple-500 focus:outline-none focus:w-56 placeholder-gray-500"
+      />
+
+      <button
+        @click="handleAnalyze"
+        :disabled="isAnalyzing || (logs.length === 0 && !userQuestion.trim())"
         class="flex items-center gap-1 px-2 py-1 text-xs text-white transition border rounded backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
         :class="isAnalyzing ? 'bg-gray-700 border-gray-600' : 'bg-purple-600/80 hover:bg-purple-600 border-purple-500/50'"
-        title="AI 智能分析报错原因"
+        title="AI 智能分析 / 提问"
       >
         <span v-if="isAnalyzing" class="animate-spin">⏳</span>
         <span v-else>🤖</span>
@@ -286,6 +338,14 @@ onBeforeUnmount(() => { term?.dispose(); resizeObserver.disconnect(); });
           <p class="text-xs animate-pulse">正在思考分析...</p>
         </div>
         <div v-else v-html="renderedMarkdown"></div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 px-4 py-2 text-xs border-t border-gray-700/50 text-gray-500">
+        <span>由</span>
+        <span class="text-purple-400">{{ activeConfig.name || 'AI' }}</span>
+        <span>·</span>
+        <span class="text-gray-400 font-mono">{{ activeConfig.model }}</span>
+        <span>提供</span>
       </div>
     </div>
 
