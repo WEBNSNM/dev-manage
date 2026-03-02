@@ -158,8 +158,9 @@ const toggleHide = (p) => {
 <template>
   <div class="flex flex-col min-h-screen font-sans text-white bg-gray-900">
     <div class="sticky top-0 z-10 flex flex-col items-center gap-4 p-4 bg-gray-800 border-b border-gray-700 shadow-lg md:flex-row">
-      <h1 class="flex items-center gap-2 text-xl font-bold text-blue-400 whitespace-nowrap">
-        <span>⚡</span> DevMaster
+      <h1 class="flex items-center text-xl font-bold text-blue-400 whitespace-nowrap">
+        <img style="width:50px; height: 50px" src="../../assets/main.png"/>
+        DevMaster
       </h1>
 
       <div class="flex flex-1 w-full gap-2">
