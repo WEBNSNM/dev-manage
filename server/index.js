@@ -216,7 +216,7 @@ io.on('connection', (socket) => {
 
     // 确定使用的 Node 版本和启动命令，整体包裹 try-catch 防止静默失败
     let targetNodeVersion = null;
-    let env = { ...process.env, FORCE_COLOR: '1' };
+    let customEnv = null; // null = 继承父进程环境（对 webpack HMR 更友好）
     let cmd = currentRunner;
     let spawnArgs = ['run', script];
     if (process.platform === 'win32') cmd = `${currentRunner}.cmd`;
@@ -234,7 +234,8 @@ io.on('connection', (socket) => {
       }
 
       if (targetNodeVersion) {
-        env = nodeVersions.buildEnvWithNodeVersion(targetNodeVersion);
+        // 仅在需要切换 Node 版本时才构建自定义 env（修改 PATH）
+        customEnv = nodeVersions.buildEnvWithNodeVersion(targetNodeVersion);
 
         const versionDir = nodeVersions.getVersionDir(targetNodeVersion);
         if (versionDir) {
@@ -254,7 +255,7 @@ io.on('connection', (socket) => {
       // 版本检测或命令解析出错时，回退到默认行为
       console.error(`[Node切换] 版本处理异常，回退到系统默认:`, e.message);
       targetNodeVersion = null;
-      env = { ...process.env, FORCE_COLOR: '1' };
+      customEnv = null;
       cmd = currentRunner;
       spawnArgs = ['run', script];
       if (process.platform === 'win32') cmd = `${currentRunner}.cmd`;
@@ -263,13 +264,21 @@ io.on('connection', (socket) => {
     console.log(`🚀 启动任务: ${taskKey}${targetNodeVersion ? ` (Node v${targetNodeVersion})` : ' (系统默认)'}`);
     console.log(`   命令: ${cmd} ${spawnArgs.join(' ')}`);
 
-    const child = spawn(cmd, spawnArgs, {
+    // 构建 spawn 选项
+    // 不切换 Node 版本时不传 env，让子进程自然继承父进程环境
+    // 避免 { ...process.env } 展开后丢失 Windows 大小写不敏感特性
+    // 这对 webpack-dev-server 的 HMR WebSocket 正常工作很重要
+    const spawnOpts = {
       cwd: projectPath,
       shell: true,
       detached: process.platform !== 'win32',
-      stdio: 'pipe',
-      env
-    });
+      stdio: 'pipe'
+    };
+    if (customEnv) {
+      spawnOpts.env = customEnv;
+    }
+
+    const child = spawn(cmd, spawnArgs, spawnOpts);
 
     processes.set(taskKey, child);
     
