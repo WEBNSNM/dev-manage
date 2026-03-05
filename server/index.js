@@ -6,8 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawn, exec } = require('child_process');
-// ⚠️ 注意：这里假设你的 monitor.js 在 utils 目录下
-// 如果你的 monitor.js 在 server 根目录，请改为 require('./monitor')
+
 const monitor = require('./utils/monitor');
 const nodeVersions = require('./utils/nodeVersions');
 

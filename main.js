@@ -1,6 +1,12 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
+const { execSync } = require('child_process');
 const fixPath = require('fix-path');
+
+// Windows 终端设置 UTF-8 编码，防止中文日志乱码
+if (process.platform === 'win32') {
+  try { execSync('chcp 65001', { stdio: 'ignore' }); } catch (_) {}
+}
 
 // 修复环境变量
 fixPath();
