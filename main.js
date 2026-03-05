@@ -1,6 +1,8 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 const fixPath = require('fix-path');
+
+const isProd = !process.argv.includes('--dev') && app.isPackaged;
 
 // 修复环境变量
 fixPath();
@@ -16,6 +18,11 @@ try {
 let mainWindow;
 
 function createWindow() {
+  // 生产环境隐藏顶部菜单栏
+  if (isProd) {
+    Menu.setApplicationMenu(null);
+  }
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -26,6 +33,24 @@ function createWindow() {
       contextIsolation: true
     }
   });
+
+  if (isProd) {
+    // 禁用 DevTools
+    mainWindow.webContents.on('devtools-opened', () => {
+      mainWindow.webContents.closeDevTools();
+    });
+
+    // 拦截快捷键：F12、Ctrl+Shift+I、Ctrl+Shift+J、Ctrl+Shift+C
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.key === 'F12') {
+        event.preventDefault();
+        return;
+      }
+      if (input.control && input.shift && ['I', 'J', 'C'].includes(input.key.toUpperCase())) {
+        event.preventDefault();
+      }
+    });
+  }
 
   // 这样跟你的前端代码 (import.meta.env.DEV ? ... : undefined) 也能配合
   if (server) {
