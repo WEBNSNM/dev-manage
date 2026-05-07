@@ -14,6 +14,7 @@ fixPath();
 let server;
 try {
   server = require('./server/index.js');
+  server.initializeTunnelServices?.();
 } catch (e) {
   console.error('❌ 后端加载失败，请检查根目录 node_modules:', e);
 }

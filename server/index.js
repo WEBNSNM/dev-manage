@@ -11,6 +11,7 @@ const { spawn, exec } = require('child_process');
 const monitor = require('./utils/monitor');
 const nodeVersions = require('./utils/nodeVersions');
 const appUpdater = require('./utils/appUpdater');
+const { createTunnelInitializer } = require('./utils/tunnelInitializer');
 const { resolveCommandExecution } = require('./utils/commandExecution');
 const {
   PROJECT_TAGS_BY_PATH_KEY,
@@ -704,6 +705,11 @@ const restoreTunnelTargetFromConfig = () => {
     port: restoredPort
   });
 };
+
+const initializeTunnelServices = createTunnelInitializer({
+  startTunnelGatewayServer,
+  restoreTunnelTargetFromConfig
+});
 
 const scanRecursively = (currentPath, depth = 0) => {
   if (depth > 4) return [];
@@ -1714,11 +1720,11 @@ app.get(/.*/, (req, res) => {
     }
 });
 if (require.main === module) {
-    startTunnelGatewayServer();
-    restoreTunnelTargetFromConfig();
+    initializeTunnelServices();
     server.listen(2117, () => console.log('Server running on 2117'));
 }
 
 server.cleanupManagedProcesses = () => cleanup({ exitProcess: false });
+server.initializeTunnelServices = initializeTunnelServices;
 
 module.exports = server;
