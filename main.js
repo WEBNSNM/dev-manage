@@ -10,6 +10,10 @@ const shouldHideMenu = !process.argv.includes('--show-menu');
 // 修复环境变量
 fixPath();
 
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.terminalManage.app');
+}
+
 // 引入后端
 let server;
 try {

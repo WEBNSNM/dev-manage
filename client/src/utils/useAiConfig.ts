@@ -1,4 +1,9 @@
 import { ref, computed, watch } from 'vue';
+import {
+  DEFAULT_COUNTDOWN_REMINDER_CONFIG,
+  normalizeCountdownReminderConfig,
+  type CountdownReminderConfig,
+} from './countdownReminder';
 import { socket } from './socket'; // 👈 引入刚才创建的 socket 单例
 
 // 定义存储在 JSON 文件里的 Key 名称
@@ -7,6 +12,7 @@ const STORAGE_KEY_ACTIVE = 'ai_active_id';
 const STORAGE_KEY_SCENES = 'ai_scene_configs';
 const STORAGE_KEY_TUNNEL = 'ai_tunnel_config';
 const STORAGE_KEY_WECHAT_DEVTOOLS = 'wechat_devtools_config';
+const STORAGE_KEY_COUNTDOWN_REMINDER = 'countdown_reminder_config';
 
 const DEFAULT_CONFIG: any = {
   id: 'default',
@@ -31,6 +37,9 @@ const tunnelConfig = ref({
 const wechatDevtoolsConfig = ref({
   windowsPath: '',
   macosPath: ''
+});
+const countdownReminderConfig = ref<CountdownReminderConfig>({
+  ...DEFAULT_COUNTDOWN_REMINDER_CONFIG
 });
 const isLoaded = ref(false); // 标记是否加载完成
 
@@ -79,6 +88,10 @@ const init = () => {
       };
     }
   });
+
+  socket.emit('config:load', STORAGE_KEY_COUNTDOWN_REMINDER, (data: any) => {
+    countdownReminderConfig.value = normalizeCountdownReminderConfig(data);
+  });
 };
 
 // 立即启动加载
@@ -113,6 +126,15 @@ watch(tunnelConfig, (newVal) => {
 watch(wechatDevtoolsConfig, (newVal) => {
   if (isLoaded.value) {
     socket.emit('config:save', { key: STORAGE_KEY_WECHAT_DEVTOOLS, value: newVal });
+  }
+}, { deep: true });
+
+watch(countdownReminderConfig, (newVal) => {
+  if (isLoaded.value) {
+    socket.emit('config:save', {
+      key: STORAGE_KEY_COUNTDOWN_REMINDER,
+      value: normalizeCountdownReminderConfig(newVal)
+    });
   }
 }, { deep: true });
 
@@ -157,6 +179,7 @@ export function useAiConfig() {
     sceneConfigs,
     tunnelConfig,
     wechatDevtoolsConfig,
+    countdownReminderConfig,
     getSceneConfig,
     addConfig,
     removeConfig,

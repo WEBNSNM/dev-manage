@@ -1526,6 +1526,32 @@ if ($folder) { $folder.Self.Path }
     console.log(`💾 保存配置 [${key}] Success`);
   });
 
+  socket.on('notification:show', ({ title, body } = {}, callback = () => {}) => {
+    try {
+      const electron = require('electron');
+      const Notification = electron?.Notification;
+      const safeTitle = String(title || 'terminalManage').trim() || 'terminalManage';
+      const safeBody = String(body || '').trim() || '倒计时结束';
+
+      if (!Notification || typeof Notification.isSupported !== 'function' || !Notification.isSupported()) {
+        callback({ success: false, error: '当前环境不支持系统通知' });
+        return;
+      }
+
+      const notification = new Notification({
+        title: safeTitle,
+        body: safeBody,
+        silent: false
+      });
+
+      notification.show();
+      callback({ success: true });
+    } catch (err) {
+      console.error('系统通知发送失败:', err);
+      callback({ success: false, error: '系统通知发送失败' });
+    }
+  });
+
   // --- Node 版本管理事件 ---
   socket.on('node:get-versions', (callback) => {
     const nvmHome = nodeVersions.getNvmHome();

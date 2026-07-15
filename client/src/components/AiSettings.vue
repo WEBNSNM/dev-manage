@@ -72,6 +72,17 @@
 
           <div class="px-2 py-2 border-t border-gray-700">
             <div
+              @click="showReminderView"
+              class="flex items-center gap-2 px-3 py-2.5 transition rounded cursor-pointer select-none"
+              :class="currentView === 'reminder' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-400 hover:bg-[#2a2a2d]'"
+            >
+              <span class="text-sm">⏱</span>
+              <span class="text-sm font-medium">倒计时提醒</span>
+            </div>
+          </div>
+
+          <div class="px-2 py-2 border-t border-gray-700">
+            <div
               @click="showAppView"
               class="flex items-center gap-2 px-3 py-2.5 transition rounded cursor-pointer select-none"
               :class="currentView === 'app' ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-[#2a2a2d]'"
@@ -319,6 +330,80 @@
             </div>
           </template>
 
+          <template v-else-if="currentView === 'reminder'">
+            <div class="flex-1 p-6 overflow-y-auto">
+              <div class="pb-2 mb-5 border-b border-gray-700">
+                <h4 class="text-base font-bold text-white">倒计时提醒</h4>
+                <p class="mt-1 text-xs text-gray-500">应用运行时，在指定时间段内按固定间隔发送系统通知。</p>
+              </div>
+
+              <div class="space-y-5">
+                <label class="flex items-center gap-3 text-sm text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    v-model="countdownReminderConfig.enabled"
+                    class="w-4 h-4 bg-gray-700 border-gray-600 rounded text-amber-500 focus:ring-0"
+                  >
+                  启用系统倒计时提醒
+                </label>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div>
+                    <label class="block mb-1 text-xs text-gray-500">开始时间</label>
+                    <input
+                      v-model="countdownReminderConfig.startTime"
+                      type="time"
+                      class="w-full bg-[#252526] border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none transition"
+                    >
+                  </div>
+
+                  <div>
+                    <label class="block mb-1 text-xs text-gray-500">结束时间</label>
+                    <input
+                      v-model="countdownReminderConfig.endTime"
+                      type="time"
+                      class="w-full bg-[#252526] border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none transition"
+                    >
+                  </div>
+
+                  <div>
+                    <label class="block mb-1 text-xs text-gray-500">间隔分钟</label>
+                    <input
+                      v-model.number="countdownReminderConfig.intervalMinutes"
+                      type="number"
+                      min="1"
+                      max="720"
+                      step="1"
+                      class="w-full bg-[#252526] border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none transition"
+                    >
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block mb-1 text-xs text-gray-500">通知标题</label>
+                  <input
+                    v-model="countdownReminderConfig.title"
+                    type="text"
+                    class="w-full bg-[#252526] border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none transition"
+                  >
+                </div>
+
+                <div>
+                  <label class="block mb-1 text-xs text-gray-500">通知内容</label>
+                  <textarea
+                    v-model="countdownReminderConfig.body"
+                    rows="3"
+                    class="w-full bg-[#252526] border border-gray-600 rounded px-3 py-2 text-sm text-white resize-none focus:border-amber-500 focus:outline-none transition"
+                  ></textarea>
+                </div>
+
+                <div class="p-3 text-xs text-gray-400 border border-gray-700 rounded bg-[#252526]">
+                  只要应用仍在运行，提醒会通过系统通知发出；应用完全退出后不会继续倒计时。
+                </div>
+              </div>
+            </div>
+          </template>
+
           <template v-else-if="currentView === 'app'">
             <div class="flex-1 p-6 overflow-y-auto">
               <div class="pb-2 mb-5 border-b border-gray-700">
@@ -464,6 +549,7 @@ const {
   activeConfig,
   tunnelConfig,
   wechatDevtoolsConfig,
+  countdownReminderConfig,
   addConfig,
   updateConfig,
   removeConfig
@@ -535,6 +621,13 @@ const showAppView = () => {
 
 const showToolView = () => {
   currentView.value = 'tool';
+  currentEditId.value = null;
+  formData.value = null;
+  isCreating.value = false;
+};
+
+const showReminderView = () => {
+  currentView.value = 'reminder';
   currentEditId.value = null;
   formData.value = null;
   isCreating.value = false;
