@@ -1,6 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 // 引入你的组件
 import Dashboard from '../views/dashboard/index.vue'
+import WeeklyReport from '../views/weekly-report/index.vue'
 
 const routes = [
   {
@@ -11,6 +12,11 @@ const routes = [
     path: '/dashboard',
     name: 'Dashboard',
     component: Dashboard
+  },
+  {
+    path: '/weekly-report',
+    name: 'WeeklyReport',
+    component: WeeklyReport
   },
 ]
 

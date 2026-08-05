@@ -209,3 +209,18 @@ git push origin v1.0.0
 ---
 
 Thanks to [linux社区](linux.do) — 前端终端集成效能工具
+## 周报功能
+
+周报页面地址为 `#/weekly-report`。支持导入 Git 仓库、选择需要精确匹配的 Git 作者名、按日期范围采集提交、审核本次纳入的提交，以及生成可继续编辑的 Markdown 周报。
+
+周报配置与历史记录保存在本地的 `~/.terminalManage-weekly-report.json`，活动缓存保存在 `~/.terminalManage-weekly-report-cache.json`。默认只采集 Git 提交元数据和文件变更统计，不读取源代码差异；只有明确请求提交详情时才会读取经过长度限制的 patch。
+
+在 AI 设置中为周报场景选择模型后，可以使用 DeepSeek（OpenAI 兼容接口）、Gemini（原生 `generateContent` 接口）或 OpenAI Responses API。发送给模型前，系统会对周报上下文进行路径脱敏和长度限制。
+
+独立 MCP Server 使用 `packages/weekly-report-mcp/config.example.json` 的副本作为配置文件，启动命令如下：
+
+```bash
+node packages/weekly-report-mcp/index.js
+```
+
+在 MCP 客户端中，通过环境变量 `DEVMASTER_WEEKLY_REPORT_CONFIG` 指定配置文件路径。Codex 可以使用 `skills/weekly-report/SKILL.md`，Gemini 客户端可以使用 `skills/weekly-report/gemini.md`。MCP 提供的工具均为只读操作，并会拒绝访问配置白名单以外的仓库。

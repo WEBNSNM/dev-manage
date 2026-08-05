@@ -133,7 +133,8 @@
                 <div>
                   <label class="block mb-1 text-xs text-gray-500">API 协议</label>
                   <select v-model="formData.provider" class="w-full bg-[#252526] border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none transition">
-                    <option value="openai">OpenAI 兼容 (DeepSeek / GPT / Codex 等)</option>
+                    <option value="openai">OpenAI 兼容 (DeepSeek / GPT)</option>
+                    <option value="openai-responses">OpenAI Responses (Codex / GPT)</option>
                     <option value="anthropic">Anthropic (Claude)</option>
                     <option value="gemini">Google Gemini</option>
                   </select>
@@ -239,6 +240,22 @@
                       >
                         <option value="">跟随全局默认 ({{ globalModelName }})</option>
                         <option v-for="c in configList" :key="c.id" :value="c.id">{{ c.name }} — {{ c.model }}</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <div class="p-4 border border-gray-700 rounded-lg bg-[#252526] transition hover:border-gray-600">
+                  <div class="flex items-start gap-3">
+                    <div class="flex items-center justify-center flex-shrink-0 text-lg text-blue-400 rounded-lg w-9 h-9 bg-blue-500/15">W</div>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium text-white">Weekly Report</span>
+                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400/80">weekly report</span>
+                      </div>
+                      <p class="mb-3 text-xs text-gray-500">Summarize authored Git activity across repositories</p>
+                      <select v-model="sceneConfigs.weeklyReport" class="w-full bg-[#1e1e1e] border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none transition">
+                        <option value="">Follow global default ({{ globalModelName }})</option>
+                        <option v-for="c in configList" :key="c.id" :value="c.id">{{ c.name }} - {{ c.model }}</option>
                       </select>
                     </div>
                   </div>

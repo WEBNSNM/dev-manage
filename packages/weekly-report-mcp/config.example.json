@@ -1,0 +1,8 @@
+{
+  "repositories": [
+    { "id": "replace-with-repository-id", "name": "app", "path": "C:/work/app", "enabled": true }
+  ],
+  "identities": [
+    { "name": "Your Git Author Name", "emails": ["optional@example.com"] }
+  ]
+}

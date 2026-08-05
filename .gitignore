@@ -27,3 +27,4 @@ CLAUDE.md
 .ace-tool/
 .claude/
 dist_electron/
+.worktrees/

@@ -1,0 +1,8 @@
+{
+  "name": "@devmaster/weekly-report-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": { "test": "node --test mcp.test.js", "start": "node index.js" }
+}

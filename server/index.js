@@ -13,6 +13,10 @@ const nodeVersions = require('./utils/nodeVersions');
 const appUpdater = require('./utils/appUpdater');
 const { createTunnelInitializer } = require('./utils/tunnelInitializer');
 const { resolveCommandExecution } = require('./utils/commandExecution');
+const { createWeeklyReportRuntime } = require('./services/weeklyReport/runtime');
+const { discoverAuthors, collectActivity, runGit } = require('./services/weeklyReport/gitActivity');
+const { buildReportContext } = require('./services/weeklyReport/reportContext');
+const { generateText } = require('./services/ai/generateText');
 const {
   PROJECT_TAGS_BY_PATH_KEY,
   WECHAT_DEVTOOLS_CONFIG_KEY,
@@ -24,6 +28,12 @@ const {
 
 // 配置文件存在用户目录下，防止误删
 const CONFIG_PATH = path.join(os.homedir(), '.terminalManage-config.json');
+const WEEKLY_REPORT_STATE_PATH = path.join(os.homedir(), '.terminalManage-weekly-report.json');
+const WEEKLY_REPORT_CACHE_PATH = path.join(os.homedir(), '.terminalManage-weekly-report-cache.json');
+const weeklyReportRuntime = createWeeklyReportRuntime({
+  statePath: WEEKLY_REPORT_STATE_PATH,
+  cachePath: WEEKLY_REPORT_CACHE_PATH
+});
 const app = express();
 app.use(cors());
 
@@ -1525,6 +1535,75 @@ if ($folder) { $folder.Self.Path }
     writeConfigFile(allData); // 写入硬盘
     console.log(`💾 保存配置 [${key}] Success`);
   });
+
+  const weeklyCallback = (callback, operation) => {
+    Promise.resolve().then(operation).then(
+      (data) => callback?.({ success: true, data }),
+      (error) => callback?.({
+        success: false,
+        error: { code: error.code || 'WEEKLY_REPORT_ERROR', message: error.message || String(error) }
+      })
+    );
+  };
+
+  socket.on('weekly-report:repositories:list', (_payload, callback) =>
+    weeklyCallback(callback, () => weeklyReportRuntime.registry.list()));
+  socket.on('weekly-report:repositories:add', ({ projectPath } = {}, callback) =>
+    weeklyCallback(callback, () => weeklyReportRuntime.registry.add(projectPath)));
+  socket.on('weekly-report:repositories:import-root', ({ rootPath, maxDepth = 5 } = {}, callback) =>
+    weeklyCallback(callback, () => weeklyReportRuntime.registry.importRoot(rootPath, { maxDepth })));
+  socket.on('weekly-report:repositories:set-enabled', ({ id, enabled } = {}, callback) =>
+    weeklyCallback(callback, () => weeklyReportRuntime.registry.setEnabled(id, enabled)));
+  socket.on('weekly-report:repositories:remove', ({ id } = {}, callback) =>
+    weeklyCallback(callback, () => weeklyReportRuntime.registry.remove(id)));
+
+  socket.on('weekly-report:identities:list', (_payload, callback) => weeklyCallback(callback, async () => {
+    const selected = await weeklyReportRuntime.identities.list();
+    const repositories = (await weeklyReportRuntime.registry.list()).filter((item) => item.enabled !== false);
+    const candidates = await discoverAuthors(repositories, { months: 12 });
+    return { selected, candidates };
+  }));
+  socket.on('weekly-report:identities:save', ({ identities } = {}, callback) =>
+    weeklyCallback(callback, () => weeklyReportRuntime.identities.save(identities)));
+
+  socket.on('weekly-report:activity:collect', ({ startDate, endDate } = {}, callback) => weeklyCallback(callback, async () => {
+    const repositories = await weeklyReportRuntime.registry.list();
+    const identities = await weeklyReportRuntime.identities.list();
+    const result = await collectActivity({
+      repositories,
+      authorNames: identities.map((item) => item.name),
+      startDate,
+      endDate
+    });
+    const names = new Map(repositories.map((item) => [item.id, item.name]));
+    result.commits = result.commits.map((commit) => ({ ...commit, repositoryName: names.get(commit.repositoryId) || commit.repositoryId }));
+    return result;
+  }));
+  socket.on('weekly-report:generate-context', ({ activity, limits } = {}, callback) =>
+    weeklyCallback(callback, () => buildReportContext(activity, limits)));
+  socket.on('weekly-report:generate', ({ context, systemPrompt, configId } = {}, callback) => weeklyCallback(callback, async () => {
+    const allConfig = readConfigFile();
+    const configList = allConfig.ai_config_list || [];
+    const sceneId = configId || allConfig.ai_scene_configs?.weeklyReport || allConfig.ai_active_id || '';
+    const config = configList.find((item) => item.id === sceneId) || configList[0];
+    return generateText({
+      config,
+      systemPrompt: systemPrompt || '根据提供的 Git 活动生成简洁、事实准确的中文周报 Markdown。',
+      userContent: JSON.stringify(context || {})
+    });
+  }));
+  socket.on('weekly-report:commit:details', ({ repositoryId, hash } = {}, callback) => weeklyCallback(callback, async () => {
+    const repository = (await weeklyReportRuntime.registry.list()).find((item) => item.id === repositoryId && item.enabled !== false);
+    if (!repository) throw Object.assign(new Error('Repository is not registered'), { code: 'REPOSITORY_NOT_ALLOWED' });
+    const patchText = await runGit(repository.path, ['show', '--format=', '--stat', '--patch', String(hash || '')]);
+    return { repositoryId, hash: String(hash || ''), patch: patchText.slice(0, 8000), truncated: patchText.length > 8000 };
+  }));
+  socket.on('weekly-report:history:list', (_payload, callback) =>
+    weeklyCallback(callback, () => weeklyReportRuntime.reports.listReports()));
+  socket.on('weekly-report:history:get', ({ id } = {}, callback) =>
+    weeklyCallback(callback, () => weeklyReportRuntime.reports.getReport(id)));
+  socket.on('weekly-report:history:save', ({ report } = {}, callback) =>
+    weeklyCallback(callback, () => weeklyReportRuntime.reports.saveReport(report)));
 
   socket.on('notification:show', ({ title, body } = {}, callback = () => {}) => {
     try {

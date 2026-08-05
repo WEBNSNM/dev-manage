@@ -26,7 +26,7 @@ const DEFAULT_CONFIG: any = {
 // 响应式状态
 const configList = ref([DEFAULT_CONFIG]);
 const activeId = ref('default');
-const sceneConfigs = ref<Record<string, string>>({ git: '', diagnosis: '' });
+const sceneConfigs = ref<Record<string, string>>({ git: '', diagnosis: '', weeklyReport: '' });
 const tunnelConfig = ref({
   token: '',
   publicDomain: '',
@@ -64,7 +64,7 @@ const init = () => {
   // 3. 加载场景配置
   socket.emit('config:load', STORAGE_KEY_SCENES, (data: any) => {
     if (data && typeof data === 'object') {
-      sceneConfigs.value = { git: '', diagnosis: '', ...data };
+      sceneConfigs.value = { git: '', diagnosis: '', weeklyReport: '', ...data };
     }
   });
 

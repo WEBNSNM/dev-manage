@@ -13,6 +13,7 @@
     "client": "cd client && npm run dev",
     "dev": "concurrently \"npm run server\" \"npm run client\" --names \"SERVER,CLIENT\" -c \"bgBlue.bold,bgGreen.bold\"",
     "start": "electron .",
+    "weekly-report:mcp": "node packages/weekly-report-mcp/index.js",
     "startmenu": "electron . -- --show-menu",
     "pack": "node scripts/build-electron.js --dir",
     "dist": "node scripts/build-electron.js"

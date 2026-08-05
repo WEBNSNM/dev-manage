@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "repositories": [
+    {
+      "name": "dev-master",
+      "commits": [
+        {
+          "hash": "abc1234",
+          "authorName": "Alice",
+          "authoredAt": "2026-08-04T10:00:00+08:00",
+          "subject": "feat: add weekly report",
+          "files": ["server/services/weeklyReport"],
+          "insertions": 120,
+          "deletions": 8
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "truncated": false
+}
